@@ -1,0 +1,100 @@
+@import "tailwindcss";
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+/* Live Map & Radar Telemetry Animations */
+@keyframes radar-sweep {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes pulse-wave {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.9;
+  }
+  70% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
+@keyframes electric-flow {
+  to {
+    stroke-dashoffset: -40;
+  }
+}
+
+@keyframes scanline {
+  0% {
+    top: 0%;
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 0.6;
+  }
+  100% {
+    top: 100%;
+    opacity: 0.2;
+  }
+}
+
+.animate-radar-sweep {
+  animation: radar-sweep 5s linear infinite;
+  transform-origin: center center;
+}
+
+.animate-pulse-wave {
+  animation: pulse-wave 2.2s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+.animate-electric-flow {
+  stroke-dasharray: 6 4;
+  animation: electric-flow 1.5s linear infinite;
+}
+
+.animate-scanline {
+  animation: scanline 4s ease-in-out infinite alternate;
+}
+
+/* Print Stylesheet for electronic receipts and booking passes */
+@media print {
+  body {
+    background-color: #ffffff !important;
+    color: #111827 !important;
+  }
+
+  header,
+  footer,
+  .no-print,
+  #floating-contact-btn,
+  #back-to-top-btn,
+  #cookie-banner,
+  #scroll-progress-bar {
+    display: none !important;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+
+  .print-card {
+    border: 1px solid #d1d5db !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+    color: #111827 !important;
+    page-break-inside: avoid;
+  }
+}

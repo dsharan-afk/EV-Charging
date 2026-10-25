@@ -1,0 +1,8 @@
+{
+  "name": "Remix VoltFlow - EV Charging Station Management",
+  "description": "Locate nearby electric vehicle charging stations, reserve charging slots, monitor real-time charging telemetry, manage EV garage profiles, and pay seamlessly.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
