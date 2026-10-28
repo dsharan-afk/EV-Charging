@@ -27,6 +27,8 @@ import {
   Minimize2,
   Layers,
   ChevronRight,
+  LocateFixed,
+  Loader2,
 } from 'lucide-react';
 import { GoogleMapView } from './GoogleMapView';
 
@@ -431,6 +433,18 @@ const STATE_MAP_CONFIGS: Record<string, StateMapConfig> = {
   },
 };
 
+type UserLocation = { latitude: number; longitude: number; accuracy?: number };
+
+const getDistanceKm = (from: UserLocation, to: { latitude: number; longitude: number }) => {
+  const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
+  const dLat = toRadians(to.latitude - from.latitude);
+  const dLng = toRadians(to.longitude - from.longitude);
+  const lat1 = toRadians(from.latitude);
+  const lat2 = toRadians(to.latitude);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
 export const StationsView: React.FC = () => {
   const {
     stations,
@@ -447,6 +461,9 @@ export const StationsView: React.FC = () => {
     openBookingForStation,
     startChargingSession,
     primaryVehicle,
+    vehicles,
+    setActiveTab,
+    setIsAddVehicleModalOpen,
     showToast,
     lastUpdatedDate,
     refreshStationData,
@@ -460,6 +477,10 @@ export const StationsView: React.FC = () => {
   const [isLiveAnimationEnabled, setIsLiveAnimationEnabled] = useState(true);
   const [isZoomedToState, setIsZoomedToState] = useState(true);
   const [isMapExpanded, setIsMapExpanded] = useState(false);
+  const [userLocation, setUserLocation] = useState<UserLocation | null>(null);
+  const [isLocating, setIsLocating] = useState(false);
+  const [locationMessage, setLocationMessage] = useState('');
+
 
   // Auto-detect if user searched for or filtered by an Indian state
   const detectedStateName = useMemo(() => {
@@ -551,6 +572,56 @@ export const StationsView: React.FC = () => {
     });
   }, [stations, searchQuery, selectedStateFilter, selectedConnectorFilter, selectedSpeedFilter, onlyAvailable]);
 
+  const displayedStations = useMemo(() => {
+    if (!userLocation) return filteredStations;
+    const withDistances = filteredStations.map((station) => ({
+      station,
+      distance: getDistanceKm(userLocation, station),
+    }));
+    const nearby = withDistances.filter((item) => item.distance <= 50);
+    // Prefer stations within 50 km. If none exist, retain all results, nearest first.
+    const results = nearby.length ? nearby : withDistances;
+    return results.sort((a, b) => a.distance - b.distance).map((item) => item.station);
+  }, [filteredStations, userLocation]);
+
+  const requestUserLocation = () => {
+    if (!navigator.geolocation) {
+      setLocationMessage('Location is not supported by this browser. You can still search by city or state.');
+      return;
+    }
+    setIsLocating(true);
+    setLocationMessage('');
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const nextLocation = {
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          accuracy: position.coords.accuracy,
+        };
+        setUserLocation(nextLocation);
+        setSelectedStateFilter('ALL');
+        setSearchQuery('');
+        setLocationMessage('Showing stations nearest to your current location.');
+        setIsLocating(false);
+      },
+      (error) => {
+        const message = error.code === error.PERMISSION_DENIED
+          ? 'Location permission was denied. Allow location in your browser settings, or search by city/state instead.'
+          : error.code === error.TIMEOUT
+            ? 'Finding your location timed out. Please try again.'
+            : 'Could not determine your location. Please try again or search by city/state.';
+        setLocationMessage(message);
+        setIsLocating(false);
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 },
+    );
+  };
+
+  const clearUserLocation = () => {
+    setUserLocation(null);
+    setLocationMessage('');
+  };
+
   // Aggregate stats for current filter
   const stateSummary = useMemo(() => {
     const totalCapKw = filteredStations.reduce((sum, s) => sum + s.powerKw, 0);
@@ -571,11 +642,19 @@ export const StationsView: React.FC = () => {
       return;
     }
 
+    const vehicle = primaryVehicle ?? vehicles[0];
+    if (!vehicle) {
+      showToast('Add a vehicle before starting a charging session.', 'warning');
+      setActiveTab('vehicle');
+      setIsAddVehicleModalOpen(true);
+      return;
+    }
+
     startChargingSession({
       station,
       portNumber: port.portNumber,
       connectorType: port.connectorType,
-      vehicle: primaryVehicle,
+      vehicle,
     });
     setInspectingStation(null);
   };
@@ -693,6 +772,42 @@ export const StationsView: React.FC = () => {
                 <X className="h-4 w-4" />
               </button>
             )}
+          </div>
+        </div>
+
+        {/* Optional browser location access: requested only after the user clicks */}
+        <div className="rounded-2xl border border-emerald-500/25 bg-gradient-to-r from-emerald-500/10 via-neutral-950 to-neutral-950 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-emerald-500/25 bg-emerald-500/10 text-emerald-400">
+              <LocateFixed className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 className="text-sm sm:text-base font-bold text-white">
+                {userLocation ? 'Nearby charging stations' : 'Find EV chargers near you'}
+              </h2>
+              <p className="mt-1 max-w-2xl text-xs leading-relaxed text-neutral-400">
+                {userLocation
+                  ? 'Your map and station results are sorted by distance from your current location. Your precise location stays in this browser session.'
+                  : 'Allow location access to center the map on you and prioritize nearby chargers. Your browser will ask for permission after you click.'}
+              </p>
+              {locationMessage && <p role="status" className="mt-2 text-xs text-emerald-300">{locationMessage}</p>}
+            </div>
+          </div>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            {userLocation && (
+              <button type="button" onClick={clearUserLocation} className="rounded-xl border border-neutral-700 px-3 py-2 text-xs font-semibold text-neutral-300 hover:border-neutral-500 hover:text-white">
+                Turn off nearby mode
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={requestUserLocation}
+              disabled={isLocating}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-2.5 text-xs font-bold text-neutral-950 transition hover:bg-emerald-400 disabled:cursor-wait disabled:opacity-70"
+            >
+              {isLocating ? <Loader2 className="h-4 w-4 animate-spin" /> : <LocateFixed className="h-4 w-4" />}
+              {isLocating ? 'Finding location…' : userLocation ? 'Update my location' : 'Use my location'}
+            </button>
           </div>
         </div>
 
@@ -983,13 +1098,15 @@ export const StationsView: React.FC = () => {
           {activeVisualizerMode === 'google' ? (
             <div className={`relative w-full ${isMapExpanded ? 'h-[500px] sm:h-[580px]' : 'h-[440px] sm:h-[500px]'} rounded-xl overflow-hidden border border-neutral-800/80`}>
               <GoogleMapView
-                stations={filteredStations}
+                stations={displayedStations}
                 selectedStation={selectedStation}
                 onSelectStation={(stn) => {
                   setSelectedStation(stn);
                   setInspectingStation(stn);
                 }}
                 activeCityKey={detectedStateName || selectedStateFilter || 'ALL'}
+                userLocation={userLocation}
+                onClearLocation={clearUserLocation}
               />
             </div>
           ) : activeVisualizerMode === 'map' ? (
@@ -1081,7 +1198,7 @@ export const StationsView: React.FC = () => {
               )}
 
               {/* Clickable Station Pins Plotted by Real GPS Latitude & Longitude with Animated Beacon Rings */}
-              {filteredStations.map((station) => {
+              {displayedStations.map((station) => {
                 const pos = getMapCoordinates(station.latitude, station.longitude);
                 const isSelected = selectedStation?.id === station.id;
                 const isAvail = station.availablePorts > 0;
@@ -1194,7 +1311,7 @@ export const StationsView: React.FC = () => {
               )}
 
               {/* Station Markers on Radar with Pulse Waves */}
-              {filteredStations.map((station, index) => {
+              {displayedStations.map((station, index) => {
                 const positions = [
                   { top: '35%', left: '55%' },
                   { top: '60%', left: '38%' },
@@ -1293,7 +1410,7 @@ export const StationsView: React.FC = () => {
               </button>
             </div>
           ) : (
-            filteredStations.map((station) => {
+            displayedStations.map((station) => {
               const isSelected = selectedStation?.id === station.id;
 
               return (
@@ -1346,7 +1463,7 @@ export const StationsView: React.FC = () => {
 
                     <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-start gap-1 shrink-0">
                       <span className="text-xs font-mono font-bold text-emerald-400 tabular-nums">
-                        {station.distanceKm} km away
+                        {userLocation ? `${getDistanceKm(userLocation, station).toFixed(1)} km away` : `${station.distanceKm} km away`}
                       </span>
                       <span className="text-xs text-neutral-300 font-mono font-bold">
                         ₹{station.pricingPerKwh.toFixed(2)}/kWh

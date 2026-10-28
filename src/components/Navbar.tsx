@@ -4,7 +4,6 @@ import {
   Zap,
   BatteryCharging,
   Layers,
-  ShieldCheck,
   User,
   Search,
   Sun,
@@ -22,7 +21,6 @@ export const Navbar: React.FC = () => {
     activeTab,
     setActiveTab,
     user,
-    toggleUserRole,
     activeSession,
     setIsArchitectureModalOpen,
     theme,
@@ -204,16 +202,6 @@ export const Navbar: React.FC = () => {
                   {link.label}
                 </button>
               ))}
-            </div>
-
-            <div className="flex items-center justify-end pt-1 text-xs">
-              <button
-                onClick={toggleUserRole}
-                className="flex items-center gap-1.5 text-neutral-400 hover:text-white"
-              >
-                <ShieldCheck className="h-4 w-4 text-amber-400" />
-                <span>{user.role === 'ADMIN' ? 'Admin Mode' : 'Customer Mode'}</span>
-              </button>
             </div>
 
             {isAuthenticated ? (

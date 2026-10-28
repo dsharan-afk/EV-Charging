@@ -82,7 +82,7 @@ export interface Booking {
   estimatedEnergyKwh: number;
   estimatedCost: number;
   status: BookingStatus;
-  qrCodeToken: string;
+  qrCodeData: string;
   createdAt: string;
 }
 
@@ -130,6 +130,18 @@ export interface PaymentTransaction {
   };
 }
 
+export interface SavedPaymentMethod {
+  id: string;
+  type: 'CARD' | 'UPI';
+  brand?: 'Visa' | 'Mastercard' | 'Amex' | 'RuPay';
+  last4?: string;
+  expMonth?: number;
+  expYear?: number;
+  upiId?: string;
+  status: 'DEMO_ONLY' | 'UNVERIFIED';
+  createdAt: string;
+}
+
 export interface UserProfile {
   id: string;
   name: string;
@@ -142,14 +154,7 @@ export interface UserProfile {
   memberSince: string;
   totalKwhCharged: number;
   totalCo2SavedKg: number;
-  savedCards: {
-    id: string;
-    brand: 'Visa' | 'Mastercard' | 'Amex';
-    last4: string;
-    expMonth: string;
-    expYear: string;
-    isDefault: boolean;
-  }[];
+  paymentMethods: SavedPaymentMethod[];
 }
 
 export interface UtmParams {

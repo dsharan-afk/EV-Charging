@@ -1,30 +1,45 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import QRCode from 'qrcode';
 import { useApp } from '../context/AppContext';
-import { ChargingStation, ChargingPort, ConnectorType, Booking } from '../types';
+import type { Booking, ChargingStation } from '../types';
+import { ApiError, listStations, toChargingStation } from '../lib/api';
 import {
   Calendar,
-  Clock,
   MapPin,
   Zap,
   Car,
   QrCode,
   CheckCircle2,
-  AlertCircle,
   X,
   Play,
-  ArrowRight,
-  ShieldCheck,
   Copy,
   Printer,
 } from 'lucide-react';
 
+const localDateValue = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const bookingStartDate = (dateValue: string, timeSlot: string) => {
+  const match = timeSlot.match(/^(\d{1,2}):(\d{2}) (AM|PM)/);
+  if (!match) return null;
+
+  let hours = Number(match[1]) % 12;
+  if (match[3] === 'PM') hours += 12;
+  const date = new Date(`${dateValue}T00:00:00`);
+  date.setHours(hours, Number(match[2]), 0, 0);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
 export const BookingView: React.FC = () => {
   const {
     vehicles,
-    primaryVehicle,
-    stations,
+    setActiveTab,
+    setIsAddVehicleModalOpen,
     selectedStation,
-    setSelectedStation,
     bookings,
     createBooking,
     cancelBooking,
@@ -33,58 +48,183 @@ export const BookingView: React.FC = () => {
     copyToClipboard,
   } = useApp();
 
-  const [selectedVehicleId, setSelectedVehicleId] = useState(primaryVehicle?.id || vehicles[0]?.id || '');
-  const [chosenStationId, setChosenStationId] = useState(selectedStation?.id || stations[0]?.id || '');
-  const currentStation = stations.find((s) => s.id === chosenStationId) || stations[0];
-
-  const availablePorts = currentStation?.ports.filter((p) => p.status === 'AVAILABLE') || [];
-  const [selectedPortId, setSelectedPortId] = useState<string>(availablePorts[0]?.id || currentStation?.ports[0]?.id || '');
-
-  const [bookingDate, setBookingDate] = useState('Today');
+  const [bookingStations, setBookingStations] = useState<ChargingStation[]>([]);
+  const [stationsLoading, setStationsLoading] = useState(true);
+  const [stationsError, setStationsError] = useState('');
+  const [selectedVehicleId, setSelectedVehicleId] = useState(vehicles[0]?.id ?? '');
+  const [chosenStationId, setChosenStationId] = useState('');
+  const [selectedPortId, setSelectedPortId] = useState('');
+  const [bookingDate, setBookingDate] = useState(() => localDateValue(new Date()));
   const [timeSlot, setTimeSlot] = useState('04:30 PM - 05:15 PM');
   const [durationMinutes, setDurationMinutes] = useState(45);
-
   const [viewingPass, setViewingPass] = useState<Booking | null>(null);
+  const [qrImage, setQrImage] = useState('');
+  const [qrError, setQrError] = useState('');
+  const [bookingError, setBookingError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const bookingSubmissionInProgress = useRef(false);
 
-  const selectedVehicle = vehicles.find((v) => v.id === selectedVehicleId) || primaryVehicle;
-  const selectedPort = currentStation?.ports.find((p) => p.id === selectedPortId) || currentStation?.ports[0];
+  const currentStation = bookingStations.find((station) => station.id === chosenStationId);
+  const selectedVehicle = vehicles.find((v) => v.id === selectedVehicleId);
+  const selectedPort = currentStation?.ports.find((port) => port.id === selectedPortId);
 
-  const estimatedEnergyKwh = Number(((durationMinutes / 60) * Math.min(currentStation.powerKw, selectedVehicle?.maxChargingRateKw || 150) * 0.75).toFixed(1));
-  const estimatedCost = Number((estimatedEnergyKwh * currentStation.pricingPerKwh).toFixed(2));
+  const estimatedEnergyKwh = Number((
+    (durationMinutes / 60) *
+    Math.min(selectedPort?.maxPowerKw ?? 0, selectedVehicle?.maxChargingRateKw ?? 0) *
+    0.75
+  ).toFixed(1));
+  const estimatedCost = Number((estimatedEnergyKwh * (currentStation?.pricingPerKwh ?? 0)).toFixed(2));
 
-  const handleBookingSubmit = (e: React.FormEvent) => {
+  const dateOptions = [0, 1, 2].map((offset) => {
+    const date = new Date();
+    date.setDate(date.getDate() + offset);
+    return {
+      value: localDateValue(date),
+      label: offset === 0 ? 'Today' : offset === 1 ? 'Tomorrow' : date.toLocaleDateString([], { month: 'short', day: 'numeric' }),
+    };
+  });
+
+  useEffect(() => {
+    let active = true;
+    setStationsLoading(true);
+    setStationsError('');
+    listStations(new URLSearchParams({ limit: '100' }))
+      .then(({ items }) => {
+        if (!active) return;
+        const savedStations = items.map(toChargingStation);
+        setBookingStations(savedStations);
+        const preferred = savedStations.find((station) => station.id === selectedStation?.id);
+        setChosenStationId(preferred?.id ?? savedStations[0]?.id ?? '');
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setStationsError(error instanceof ApiError
+          ? error.message
+          : 'Unable to load stations from the booking service.');
+      })
+      .finally(() => {
+        if (active) setStationsLoading(false);
+      });
+    return () => { active = false; };
+  }, [selectedStation?.id]);
+
+  useEffect(() => {
+    const selectedPortIsValid = currentStation?.ports.some((port) =>
+      port.id === selectedPortId &&
+      port.status === 'AVAILABLE' &&
+      (!selectedVehicle || port.connectorType === selectedVehicle.connectorType)
+    );
+    if (selectedPortIsValid) return;
+    const firstCompatiblePort = currentStation?.ports.find((port) =>
+      port.status === 'AVAILABLE' &&
+      (!selectedVehicle || port.connectorType === selectedVehicle.connectorType)
+    );
+    setSelectedPortId(firstCompatiblePort?.id ?? '');
+  }, [currentStation, selectedPortId, selectedVehicle]);
+
+  useEffect(() => {
+    let active = true;
+    setQrImage('');
+    setQrError('');
+    if (!viewingPass) return () => { active = false; };
+    QRCode.toDataURL(viewingPass.qrCodeData, {
+      errorCorrectionLevel: 'M',
+      margin: 1,
+      width: 256,
+    }).then((dataUrl) => {
+      if (active) setQrImage(dataUrl);
+    }).catch(() => {
+      if (active) setQrError('The reservation is confirmed, but the QR image could not be generated.');
+    });
+    return () => { active = false; };
+  }, [viewingPass]);
+
+  const handleBookingSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (bookingSubmissionInProgress.current) return;
+    setBookingError('');
 
-    if (!selectedVehicle || !currentStation || !selectedPort) {
-      showToast('Please complete all booking selections', 'warning');
+    if (!selectedVehicle) {
+      setBookingError('Select a vehicle before reserving a charging port.');
+      return;
+    }
+    if (stationsLoading) {
+      setBookingError('Wait for station availability to finish loading.');
+      return;
+    }
+    if (!currentStation) {
+      setBookingError(stationsError || 'No stations are configured in the booking service yet. Ask an administrator to add a station and its ports.');
+      return;
+    }
+    if (currentStation.status === 'MAINTENANCE') {
+      setBookingError('This station is under maintenance. Choose another station.');
+      return;
+    }
+    if (!selectedPort || selectedPort.status !== 'AVAILABLE') {
+      setBookingError('Select an available charging port.');
+      return;
+    }
+    if (selectedPort.connectorType !== selectedVehicle.connectorType) {
+      setBookingError('The selected port is not compatible with this vehicle.');
+      return;
+    }
+    if (!Number.isInteger(durationMinutes) || durationMinutes < 15 || durationMinutes > 480) {
+      setBookingError('Choose a charging duration between 15 minutes and 8 hours.');
+      return;
+    }
+    const startsAt = bookingStartDate(bookingDate, timeSlot);
+    if (!startsAt) {
+      setBookingError('Choose a valid reservation date and start time.');
+      return;
+    }
+    if (startsAt.getTime() < Date.now() + 5 * 60 * 1000) {
+      setBookingError('Choose a start time at least five minutes in the future.');
       return;
     }
 
-    const newBooking = createBooking({
-      vehicleId: selectedVehicle.id,
-      vehicleName: `${selectedVehicle.make} ${selectedVehicle.model}`,
-      stationId: currentStation.id,
-      stationName: currentStation.name,
-      stationAddress: `${currentStation.address}, ${currentStation.city}`,
-      portId: selectedPort.id,
-      portNumber: selectedPort.portNumber,
-      connectorType: selectedPort.connectorType,
-      date: bookingDate,
-      timeSlot: timeSlot,
-      durationMinutes: Number(durationMinutes),
-      estimatedEnergyKwh,
-      estimatedCost,
-    });
-
-    setViewingPass(newBooking);
+    const targetSocPercent = Math.min(
+      100,
+      selectedVehicle.currentSocPercent + estimatedEnergyKwh / selectedVehicle.batteryCapacityKwh * 100,
+    );
+    bookingSubmissionInProgress.current = true;
+    setIsSubmitting(true);
+    try {
+      const newBooking = await createBooking({
+        vehicleId: selectedVehicle.id,
+        vehicleName: `${selectedVehicle.make} ${selectedVehicle.model}`,
+        stationId: currentStation.id,
+        stationName: currentStation.name,
+        stationAddress: `${currentStation.address}, ${currentStation.city}`,
+        portId: selectedPort.id,
+        portNumber: selectedPort.portNumber,
+        connectorType: selectedPort.connectorType,
+        durationMinutes,
+        startsAt: startsAt.toISOString(),
+        targetSocPercent,
+      });
+      setViewingPass(newBooking);
+    } catch (error) {
+      const message = error instanceof ApiError
+        ? error.message
+        : 'Unable to save the reservation. Please try again.';
+      setBookingError(message);
+      showToast(message, 'error');
+    } finally {
+      bookingSubmissionInProgress.current = false;
+      setIsSubmitting(false);
+    }
   };
 
   const handleStartChargingFromBooking = (booking: Booking) => {
-    const station = stations.find((s) => s.id === booking.stationId);
-    const vehicle = vehicles.find((v) => v.id === booking.vehicleId) || primaryVehicle;
+    const station = bookingStations.find((s) => s.id === booking.stationId);
+    const vehicle = vehicles.find((v) => v.id === booking.vehicleId);
 
     if (!station) {
       showToast('Station information could not be loaded', 'error');
+      return;
+    }
+    if (!vehicle) {
+      showToast('This booking has no available vehicle. Add or select a vehicle to continue.', 'warning');
       return;
     }
 
@@ -109,7 +249,7 @@ export const BookingView: React.FC = () => {
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-white">Reserve Charging Stalls</h1>
         <p className="text-xs text-neutral-400 mt-0.5">
-          Schedule guaranteed charging slots, bypass wait times, and receive an instant cryptographic access QR pass
+          Schedule a charging slot and receive a scannable QR pass containing your reservation reference
         </p>
       </div>
 
@@ -123,12 +263,30 @@ export const BookingView: React.FC = () => {
                 <Car className="h-3.5 w-3.5 text-emerald-400" />
                 <span>1. Select Electric Vehicle</span>
               </label>
+              {vehicles.length === 0 ? (
+                <div className="rounded-xl border border-neutral-800 bg-neutral-950/60 p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <p className="text-xs text-neutral-300">No vehicles added yet. Add a vehicle before booking a charging session.</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('vehicle');
+                      setIsAddVehicleModalOpen(true);
+                    }}
+                    className="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-emerald-500 text-neutral-950 font-semibold text-xs hover:bg-emerald-400 transition-colors whitespace-nowrap"
+                  >
+                    Add Vehicle
+                  </button>
+                </div>
+              ) : (
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                 {vehicles.map((v) => (
                   <button
                     key={v.id}
                     type="button"
-                    onClick={() => setSelectedVehicleId(v.id)}
+                    onClick={() => {
+                      setSelectedVehicleId(v.id);
+                      setBookingError('');
+                    }}
                     className={`p-3 rounded-xl border text-left transition-all ${
                       selectedVehicleId === v.id
                         ? 'border-emerald-500 bg-emerald-950/20 ring-1 ring-emerald-500/30'
@@ -140,6 +298,7 @@ export const BookingView: React.FC = () => {
                   </button>
                 ))}
               </div>
+              )}
             </div>
 
             {/* Step 2: Station Selection */}
@@ -152,19 +311,30 @@ export const BookingView: React.FC = () => {
                 value={chosenStationId}
                 onChange={(e) => {
                   setChosenStationId(e.target.value);
-                  const stn = stations.find((s) => s.id === e.target.value);
-                  if (stn && stn.ports.length > 0) {
-                    setSelectedPortId(stn.ports[0].id);
-                  }
+                  setSelectedPortId('');
+                  setBookingError('');
                 }}
+                disabled={stationsLoading || bookingStations.length === 0}
                 className="w-full rounded-xl bg-neutral-950 border border-neutral-800 p-3 text-xs text-white focus:outline-none focus:border-emerald-500 font-medium"
               >
-                {stations.map((stn) => (
+                {bookingStations.length === 0 && (
+                  <option value="">
+                    {stationsLoading ? 'Loading stations…' : 'No backend stations configured'}
+                  </option>
+                )}
+                {bookingStations.map((stn) => (
                   <option key={stn.id} value={stn.id}>
                     {stn.name} ({stn.city}, {stn.state}) — {stn.powerKw}kW DC (₹{stn.pricingPerKwh.toFixed(2)}/kWh) · {stn.availablePorts} Open
                   </option>
                 ))}
               </select>
+              {stationsError ? (
+                <p className="text-xs text-rose-300" role="alert">{stationsError}</p>
+              ) : bookingStations.length === 0 && !stationsLoading ? (
+                <p className="text-xs text-amber-200">
+                  No stations are configured in the booking database. Ask an administrator to add a station and its ports before reserving.
+                </p>
+              ) : null}
             </div>
 
             {/* Step 3: Stall / Port Selection */}
@@ -174,16 +344,20 @@ export const BookingView: React.FC = () => {
                 <span>3. Choose Stall & Connector</span>
               </label>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                {currentStation.ports.map((port) => {
-                  const isAvail = port.status === 'AVAILABLE';
+                {(currentStation?.ports ?? []).map((port) => {
+                  const isAvail = port.status === 'AVAILABLE' &&
+                    (!selectedVehicle || port.connectorType === selectedVehicle.connectorType);
                   const isSelected = selectedPortId === port.id;
 
                   return (
                     <button
                       key={port.id}
                       type="button"
-                      disabled={!isAvail}
-                      onClick={() => setSelectedPortId(port.id)}
+                      disabled={!isAvail || isSubmitting}
+                      onClick={() => {
+                        setSelectedPortId(port.id);
+                        setBookingError('');
+                      }}
                       className={`p-2.5 rounded-xl border text-left transition-all ${
                         isSelected
                           ? 'border-emerald-500 bg-emerald-950/30 ring-1 ring-emerald-500/30'
@@ -195,7 +369,7 @@ export const BookingView: React.FC = () => {
                       <div className="flex items-center justify-between">
                         <span className="font-mono text-xs font-bold text-white">Stall #{port.portNumber}</span>
                         <span className={`text-[10px] ${isAvail ? 'text-emerald-400' : 'text-neutral-500'}`}>
-                          {isAvail ? 'Open' : 'Busy'}
+                          {port.status !== 'AVAILABLE' ? 'Busy' : isAvail ? 'Open' : 'Incompatible'}
                         </span>
                       </div>
                       <p className="text-[11px] text-neutral-400 mt-0.5">{port.connectorType}</p>
@@ -204,6 +378,14 @@ export const BookingView: React.FC = () => {
                   );
                 })}
               </div>
+              {currentStation && !currentStation.ports.some((port) =>
+                port.status === 'AVAILABLE' &&
+                (!selectedVehicle || port.connectorType === selectedVehicle.connectorType)
+              ) && (
+                <p className="text-xs text-amber-200">
+                  No available port at this station matches the selected vehicle.
+                </p>
+              )}
             </div>
 
             {/* Step 4: Date & Time Slot */}
@@ -211,18 +393,21 @@ export const BookingView: React.FC = () => {
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-neutral-300">Date</label>
                 <div className="grid grid-cols-3 gap-1.5">
-                  {['Today', 'Tomorrow', 'Oct 27'].map((d) => (
+                  {dateOptions.map((option) => (
                     <button
-                      key={d}
+                      key={option.value}
                       type="button"
-                      onClick={() => setBookingDate(d)}
+                      onClick={() => {
+                        setBookingDate(option.value);
+                        setBookingError('');
+                      }}
                       className={`py-2 text-xs font-medium rounded-lg border transition-colors ${
-                        bookingDate === d
+                        bookingDate === option.value
                           ? 'bg-neutral-800 border-emerald-500 text-white font-semibold'
                           : 'bg-neutral-950 border-neutral-800 text-neutral-400 hover:text-neutral-200'
                       }`}
                     >
-                      {d}
+                      {option.label}
                     </button>
                   ))}
                 </div>
@@ -232,7 +417,10 @@ export const BookingView: React.FC = () => {
                 <label className="text-xs font-semibold text-neutral-300">Time Window</label>
                 <select
                   value={timeSlot}
-                  onChange={(e) => setTimeSlot(e.target.value)}
+                  onChange={(e) => {
+                    setTimeSlot(e.target.value);
+                    setBookingError('');
+                  }}
                   className="w-full rounded-xl bg-neutral-950 border border-neutral-800 p-2.5 text-xs text-white"
                 >
                   <option value="04:30 PM - 05:15 PM">04:30 PM - 05:15 PM (Next available)</option>
@@ -251,7 +439,10 @@ export const BookingView: React.FC = () => {
                   <button
                     key={mins}
                     type="button"
-                    onClick={() => setDurationMinutes(mins)}
+                    onClick={() => {
+                      setDurationMinutes(mins);
+                      setBookingError('');
+                    }}
                     className={`py-2 text-xs font-mono font-medium rounded-lg border transition-colors ${
                       durationMinutes === mins
                         ? 'bg-emerald-500 text-neutral-950 font-bold border-emerald-400'
@@ -272,7 +463,7 @@ export const BookingView: React.FC = () => {
               </div>
               <div className="flex items-center justify-between text-neutral-400">
                 <span className="font-sans">Station Base Rate:</span>
-                <span className="text-white font-semibold tabular-nums">₹{currentStation.pricingPerKwh.toFixed(2)} / kWh</span>
+                <span className="text-white font-semibold tabular-nums">₹{(currentStation?.pricingPerKwh ?? 0).toFixed(2)} / kWh</span>
               </div>
               <div className="flex items-center justify-between text-neutral-400">
                 <span className="font-sans">Parking & Hold Reservation Fee:</span>
@@ -287,11 +478,15 @@ export const BookingView: React.FC = () => {
             {/* Submit Button */}
             <button
               type="submit"
+              disabled={isSubmitting}
               className="w-full py-3 px-4 rounded-xl bg-emerald-500 text-neutral-950 font-bold text-sm hover:bg-emerald-400 transition-colors flex items-center justify-center gap-2 shadow-sm shadow-emerald-500/20"
             >
               <CheckCircle2 className="h-4 w-4" />
-              <span>Confirm Reservation & Generate QR Pass</span>
+              <span>{isSubmitting ? 'Saving Reservation…' : 'Confirm Reservation & Generate QR Pass'}</span>
             </button>
+            {bookingError && (
+              <p className="text-xs text-rose-300" role="alert">{bookingError}</p>
+            )}
           </form>
         </div>
 
@@ -426,35 +621,43 @@ export const BookingView: React.FC = () => {
 
             <div>
               <h3 className="font-bold text-white text-lg">Digital Charging Pass</h3>
-              <p className="text-xs text-neutral-400 mt-0.5">Scan at station kiosk or plug in to authenticate</p>
+              <p className="text-xs text-neutral-400 mt-0.5">This QR contains your reservation reference only.</p>
             </div>
 
-            {/* Stylized QR Code Graphic Container */}
-            <div className="rounded-xl border border-neutral-800 bg-white p-4 mx-auto w-44 h-44 flex items-center justify-center">
-              <div className="w-full h-full border-4 border-black p-1 flex flex-col justify-between">
-                <div className="flex justify-between">
-                  <div className="w-8 h-8 bg-black flex items-center justify-center"><div className="w-4 h-4 bg-white" /></div>
-                  <div className="w-8 h-8 bg-black flex items-center justify-center"><div className="w-4 h-4 bg-white" /></div>
-                </div>
-                <div className="flex justify-center items-center">
-                  <div className="font-mono text-[9px] font-bold text-black tracking-widest">
-                    {viewingPass.bookingReference}
-                  </div>
-                </div>
-                <div className="flex justify-between">
-                  <div className="w-8 h-8 bg-black flex items-center justify-center"><div className="w-4 h-4 bg-white" /></div>
-                  <div className="w-6 h-6 bg-emerald-600 rounded-sm" />
-                </div>
-              </div>
+            <div className="rounded-xl border border-neutral-800 bg-white p-3 mx-auto w-52 h-52 flex items-center justify-center">
+              {qrImage ? (
+                <img
+                  src={qrImage}
+                  alt={`QR pass for reservation ${viewingPass.bookingReference}`}
+                  className="w-full h-full"
+                />
+              ) : (
+                <p className="text-xs text-neutral-700">
+                  {qrError || 'Generating reservation QR…'}
+                </p>
+              )}
             </div>
+            {qrError && <p className="text-xs text-amber-300" role="status">{qrError}</p>}
 
             <div className="space-y-1 text-xs">
               <p className="font-semibold text-white">{viewingPass.stationName}</p>
               <p className="text-neutral-400 font-mono">Stall #{viewingPass.portNumber} · {viewingPass.connectorType}</p>
+              <p className="text-neutral-400">{viewingPass.date}</p>
               <p className="text-emerald-400 font-semibold">{viewingPass.timeSlot}</p>
+              <p className="text-neutral-400 font-mono">{viewingPass.bookingReference}</p>
             </div>
 
             <div className="pt-2 flex flex-col gap-2 no-print">
+              {qrImage && (
+                <a
+                  href={qrImage}
+                  download={`${viewingPass.bookingReference}-qr.png`}
+                  className="w-full py-2.5 rounded-xl bg-emerald-500 text-neutral-950 font-semibold text-xs transition-colors flex items-center justify-center gap-2"
+                >
+                  <QrCode className="h-4 w-4" />
+                  <span>Download QR Pass</span>
+                </a>
+              )}
               <button
                 onClick={handlePrintPass}
                 className="w-full py-2.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-white font-semibold text-xs transition-colors flex items-center justify-center gap-2"

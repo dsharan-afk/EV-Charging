@@ -4,15 +4,10 @@ import { HERO_IMAGE_URL } from '../data/mockData';
 import {
   MapPin,
   Zap,
-  Battery,
-  Calendar,
   CreditCard,
   ArrowRight,
-  Shield,
   Clock,
-  Sparkles,
   Layers,
-  ChevronRight,
   Compass,
   Map as MapIcon,
   Image as ImageIcon,
@@ -22,7 +17,6 @@ import { GoogleMapView } from './GoogleMapView';
 export const HomeView: React.FC = () => {
   const {
     setActiveTab,
-    primaryVehicle,
     stations,
     openBookingForStation,
     setSelectedStation,
@@ -88,45 +82,6 @@ export const HomeView: React.FC = () => {
                 <ArrowRight className="h-4 w-4" />
               </button>
             </form>
-
-            {/* Live Connected Vehicle Quick Snapshot */}
-            {primaryVehicle && (
-              <div className="rounded-xl border border-neutral-800 bg-neutral-950/70 p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2.5">
-                    <Battery className="h-4 w-4 text-emerald-400" />
-                    <span className="text-sm font-semibold text-neutral-200">
-                      {primaryVehicle.make} {primaryVehicle.model}
-                    </span>
-                    <span className="text-xs text-neutral-400 font-mono">
-                      ({primaryVehicle.licensePlate})
-                    </span>
-                  </div>
-                  <button
-                    onClick={() => setActiveTab('vehicle')}
-                    className="text-xs text-emerald-400 hover:text-emerald-300 flex items-center gap-1 font-medium"
-                  >
-                    <span>Manage Garage</span>
-                    <ChevronRight className="h-3 w-3" />
-                  </button>
-                </div>
-
-                <div className="flex items-center gap-4">
-                  <div className="flex-1">
-                    <div className="h-2.5 w-full rounded-full bg-neutral-800 overflow-hidden">
-                      <div
-                        className="h-full rounded-full bg-emerald-500 transition-all duration-500"
-                        style={{ width: `${primaryVehicle.currentSocPercent}%` }}
-                      />
-                    </div>
-                  </div>
-                  <div className="text-right whitespace-nowrap font-mono text-xs">
-                    <span className="font-bold text-white tabular-nums">{primaryVehicle.currentSocPercent}%</span>
-                    <span className="text-neutral-400 ml-1">· ~{primaryVehicle.estimatedRangeKm} km</span>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
 
           {/* Right Column: Hero Visual or Google Map Container */}

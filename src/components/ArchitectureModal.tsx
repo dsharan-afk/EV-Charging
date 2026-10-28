@@ -53,7 +53,7 @@ export const ArchitectureModal: React.FC = () => {
               EV Charging Station Management System
             </h2>
             <p className="text-xs text-neutral-400 mt-0.5">
-              5-layer architecture for reliable, scalable, and intelligent charging operations (Spring Boot, Java OOP, JPA, MySQL)
+              React/Vite frontend with a Node/SQLite API and a separate Java/SQLite backend
             </p>
           </div>
 
@@ -88,7 +88,7 @@ export const ArchitectureModal: React.FC = () => {
             }`}
           >
             <Server className="h-3.5 w-3.5" />
-            <span>02. Application Layer (Spring Boot REST)</span>
+            <span>02. Application Layer (Node REST API)</span>
           </button>
 
           <button
@@ -100,7 +100,7 @@ export const ArchitectureModal: React.FC = () => {
             }`}
           >
             <Code className="h-3.5 w-3.5" />
-            <span>03. Business / Domain Layer (Java OOP)</span>
+            <span>03. API Logic & Authorization</span>
           </button>
 
           <button
@@ -112,7 +112,7 @@ export const ArchitectureModal: React.FC = () => {
             }`}
           >
             <Cpu className="h-3.5 w-3.5" />
-            <span>04. Data Access Layer (JPA / Hibernate)</span>
+            <span>04. Data Access Layer (SQLite)</span>
           </button>
 
           <button
@@ -124,7 +124,7 @@ export const ArchitectureModal: React.FC = () => {
             }`}
           >
             <Database className="h-3.5 w-3.5" />
-            <span>05. Database Layer (MySQL Tables)</span>
+            <span>05. Database Layer (Separate SQLite Stores)</span>
           </button>
         </div>
 
@@ -133,9 +133,9 @@ export const ArchitectureModal: React.FC = () => {
           <div className="space-y-6">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-neutral-900/60 p-4 rounded-2xl border border-neutral-800">
               <div>
-                <h3 className="text-sm font-bold text-white">Live End-to-End Request Pipeline</h3>
+                <h3 className="text-sm font-bold text-white">Illustrative Request Pipeline</h3>
                 <p className="text-xs text-neutral-400">
-                  Simulate a real booking request traversal through all 5 layers from client to MySQL
+                  This animation illustrates the layers; it does not issue a live API request.
                 </p>
               </div>
               <button
@@ -144,7 +144,7 @@ export const ArchitectureModal: React.FC = () => {
                 className="px-4 py-2 text-xs font-semibold rounded-xl bg-emerald-500 text-neutral-950 hover:bg-emerald-400 disabled:opacity-50 transition-colors flex items-center gap-2"
               >
                 <Play className="h-3.5 w-3.5 fill-current" />
-                <span>{isTracing ? 'Tracing Handshake...' : 'Simulate Request Flow'}</span>
+                <span>{isTracing ? 'Animating...' : 'Animate Layer Flow'}</span>
               </button>
             </div>
 
@@ -164,9 +164,9 @@ export const ArchitectureModal: React.FC = () => {
                       01
                     </span>
                     <div>
-                      <h4 className="text-sm font-bold text-white">PRESENTATION LAYER (Client-Side)</h4>
+                      <h4 className="text-sm font-bold text-white">PRESENTATION LAYER (React/Vite)</h4>
                       <p className="text-xs text-neutral-400 font-sans">
-                        Web Interface: Home · Charging Stations · My Vehicle · Booking · Profile (HTML, CSS, JS)
+                        Auth, wallet, and saved methods use the API; station/vehicle/booking screens still include demo data.
                       </p>
                     </div>
                   </div>
@@ -192,9 +192,9 @@ export const ArchitectureModal: React.FC = () => {
                       02
                     </span>
                     <div>
-                      <h4 className="text-sm font-bold text-white">APPLICATION LAYER (Spring Boot REST)</h4>
+                      <h4 className="text-sm font-bold text-white">APPLICATION LAYER (Node.js / Express)</h4>
                       <p className="text-xs text-neutral-400 font-sans">
-                        User Management · Vehicle Management · Station Management · Booking · Charging · Payment
+                        Authentication · Persisted Wallet Reads · Saved Payment Methods
                       </p>
                     </div>
                   </div>
@@ -220,13 +220,13 @@ export const ArchitectureModal: React.FC = () => {
                       03
                     </span>
                     <div>
-                      <h4 className="text-sm font-bold text-white">BUSINESS / DOMAIN LAYER (Java OOP)</h4>
+                      <h4 className="text-sm font-bold text-white">API LOGIC & AUTHORIZATION</h4>
                       <p className="text-xs text-neutral-400 font-sans">
-                        Domain Entities · ChargingService · Slot Conflict Validation · JWT Security Filter
+                        Zod Validation · JWT Identity · User-Scoped Data Access
                       </p>
                     </div>
                   </div>
-                  <span className="text-xs text-emerald-400 font-sans hidden sm:inline">Java Logic</span>
+                  <span className="text-xs text-emerald-400 font-sans hidden sm:inline">Node API</span>
                 </div>
               </div>
 
@@ -248,13 +248,13 @@ export const ArchitectureModal: React.FC = () => {
                       04
                     </span>
                     <div>
-                      <h4 className="text-sm font-bold text-white">DATA ACCESS LAYER (Spring Data JPA)</h4>
+                      <h4 className="text-sm font-bold text-white">DATA ACCESS LAYER (SQLite)</h4>
                       <p className="text-xs text-neutral-400 font-sans">
-                        Hibernate ORM · Repositories: StationRepository · BookingRepository · TransactionRepository
+                        Parameterized better-sqlite3 queries and SQLite transactions
                       </p>
                     </div>
                   </div>
-                  <span className="text-xs text-emerald-400 font-sans hidden sm:inline">Hibernate</span>
+                  <span className="text-xs text-emerald-400 font-sans hidden sm:inline">Node database</span>
                 </div>
               </div>
 
@@ -276,13 +276,13 @@ export const ArchitectureModal: React.FC = () => {
                       05
                     </span>
                     <div>
-                      <h4 className="text-sm font-bold text-white">DATABASE LAYER (MySQL Relational)</h4>
+                      <h4 className="text-sm font-bold text-white">DATABASE LAYER (SQLite)</h4>
                       <p className="text-xs text-neutral-400 font-sans">
-                        Tables: users · vehicles · charging_stations · charging_ports · bookings · payments
+                        Node and Java backends use separate SQLite database files; they are not synchronized.
                       </p>
                     </div>
                   </div>
-                  <span className="text-xs text-emerald-400 font-sans hidden sm:inline">MySQL InnoDB</span>
+                  <span className="text-xs text-emerald-400 font-sans hidden sm:inline">Two SQLite stores</span>
                 </div>
               </div>
             </div>
@@ -292,57 +292,57 @@ export const ArchitectureModal: React.FC = () => {
               <div className="p-4 rounded-xl bg-emerald-950/50 border border-emerald-500/40 flex items-center gap-3 text-xs text-emerald-300">
                 <CheckCircle className="h-5 w-5 text-emerald-400 shrink-0" />
                 <span>
-                  <strong>Request Lifecycle Complete (200 OK):</strong> MySQL returned transaction commit, Hibernate mapped entity DTO, Spring Service confirmed charging state, and React UI refreshed live telemetry without reload.
+                  <strong>Animation complete:</strong> No API request was executed. The Node API handles account, wallet, and saved-method endpoints; charging is simulated.
                 </span>
               </div>
             )}
           </div>
         )}
 
-        {/* Tab 2: Spring Boot REST APIs */}
+        {/* Tab 2: Node.js REST APIs */}
         {activeTab === 'rest' && (
           <div className="space-y-4 font-mono text-xs">
             <p className="text-neutral-400 font-sans text-xs">
-              The Application Layer exposes RESTful endpoints built with Spring MVC (`@RestController`) consuming and returning JSON payloads.
+              The frontend targets the Node.js API. The Java Spring Boot service is separate and is not the current frontend API.
             </p>
 
             <div className="space-y-3">
               <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-4 space-y-2">
                 <div className="flex items-center gap-2">
                   <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-bold">GET</span>
-                  <span className="text-white font-bold">/api/v1/stations/nearby</span>
+                  <span className="text-white font-bold">/api/v1/wallet</span>
                 </div>
-                <p className="text-neutral-400 font-sans text-xs">Queries stations within radius with active port availability.</p>
+                <p className="text-neutral-400 font-sans text-xs">Returns the signed-in user’s persisted INR balance and ledger; the user ID comes from the JWT.</p>
                 <div className="p-3 rounded-lg bg-neutral-950 border border-neutral-800 text-[11px] text-neutral-300 overflow-x-auto">
-                  {`// Response 200 OK\n[\n  {\n    "id": "stn_101",\n    "name": "Downtown Supercharge Hub",\n    "powerKw": 350,\n    "availablePorts": 5,\n    "pricingPerKwh": 0.36\n  }\n]`}
+                  {`// Response 200 OK\n{\n  "balance": 0,\n  "currency": "INR",\n  "ledger": []\n}`}
                 </div>
               </div>
 
               <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-4 space-y-2">
                 <div className="flex items-center gap-2">
                   <span className="px-2 py-0.5 rounded bg-blue-500/20 text-blue-400 font-bold">POST</span>
-                  <span className="text-white font-bold">/api/v1/bookings/reserve</span>
+                  <span className="text-white font-bold">/api/v1/payment-methods</span>
                 </div>
-                <p className="text-neutral-400 font-sans text-xs">Atomically reserves a stall and generates an encrypted QR pass token.</p>
+                <p className="text-neutral-400 font-sans text-xs">Lists only methods owned by the authenticated account.</p>
                 <div className="p-3 rounded-lg bg-neutral-950 border border-neutral-800 text-[11px] text-neutral-300 overflow-x-auto">
-                  {`// Request Body\n{\n  "userId": "usr_001",\n  "vehicleId": "veh_001",\n  "stationId": "stn_101",\n  "portNumber": 1,\n  "timeSlot": "04:30 PM - 05:15 PM"\n}`}
+                  {`// Response 200 OK\n{\n  "items": []\n}`}
                 </div>
               </div>
 
               <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-4 space-y-2">
                 <div className="flex items-center gap-2">
                   <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-400 font-bold">POST</span>
-                  <span className="text-white font-bold">/api/v1/charging/session/start</span>
+                  <span className="text-white font-bold">POST /api/v1/payment-methods</span>
                 </div>
-                <p className="text-neutral-400 font-sans text-xs">Initializes high-power hardware session and live telemetry stream.</p>
+                <p className="text-neutral-400 font-sans text-xs">Saves masked demo card metadata or an unverified UPI ID. No payment is attempted.</p>
               </div>
 
               <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-4 space-y-2">
                 <div className="flex items-center gap-2">
                   <span className="px-2 py-0.5 rounded bg-purple-500/20 text-purple-400 font-bold">POST</span>
-                  <span className="text-white font-bold">/api/v1/payments/process</span>
+                  <span className="text-white font-bold">DELETE /api/v1/payment-methods/{'{id}'}</span>
                 </div>
-                <p className="text-neutral-400 font-sans text-xs">Settle session charges via wallet balance, saved card, or RFID debit.</p>
+                <p className="text-neutral-400 font-sans text-xs">Removes only a method owned by the signed-in account. Real payment processing is unavailable.</p>
               </div>
             </div>
           </div>
@@ -352,11 +352,11 @@ export const ArchitectureModal: React.FC = () => {
         {activeTab === 'domain' && (
           <div className="space-y-4 font-mono text-xs">
             <p className="text-neutral-400 font-sans text-xs">
-              The Business/Domain Layer encapsulates domain logic in Java 21 classes, enforcing validation, pricing rules, and security.
+              The Java 21 Spring Boot project is a separate SQLite-backed service. The current frontend targets the Node API instead.
             </p>
 
             <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-4 space-y-3">
-              <span className="text-emerald-400 text-xs font-bold block">// ChargingServiceImpl.java (Spring Service)</span>
+              <span className="text-emerald-400 text-xs font-bold block">// Illustrative Java sample; not an implemented service in this repository</span>
               <pre className="text-[11px] text-neutral-300 leading-relaxed overflow-x-auto">
 {`@Service
 @Transactional
@@ -394,78 +394,54 @@ public class ChargingServiceImpl implements ChargingService {
           </div>
         )}
 
-        {/* Tab 4: Spring Data JPA */}
+        {/* Tab 4: Persistence */}
         {activeTab === 'jpa' && (
           <div className="space-y-4 font-mono text-xs">
             <p className="text-neutral-400 font-sans text-xs">
-              Spring Data JPA and Hibernate provide an ORM abstraction layer over MySQL, managing transactional boundaries and query generation.
+              The frontend-connected Node API uses parameterized better-sqlite3 queries. The separate Java service uses JDBC with SQLite; neither backend currently uses PostgreSQL.
             </p>
 
             <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-4 space-y-3">
-              <span className="text-emerald-400 text-xs font-bold block">// StationRepository.java</span>
+              <span className="text-emerald-400 text-xs font-bold block">// backend-java Database.java methods</span>
               <pre className="text-[11px] text-neutral-300 leading-relaxed overflow-x-auto">
-{`@Repository
-public interface StationRepository extends JpaRepository<ChargingStation, String> {
+{`Map<String, Object> account = db.one(
+    "SELECT id, wallet_balance FROM users WHERE id = ?",
+    authenticatedUserId
+);
 
-    @Query("SELECT s FROM ChargingStation s WHERE s.status = 'OPERATIONAL' " +
-           "AND (6371 * acos(cos(radians(:lat)) * cos(radians(s.latitude)) * " +
-           "cos(radians(s.longitude) - radians(:lng)) + sin(radians(:lat)) * " +
-           "sin(radians(s.latitude)))) <= :radiusKm")
-    List<ChargingStation> findNearby(
-        @Param("lat") double lat, 
-        @Param("lng") double lng, 
-        @Param("radiusKm") double radiusKm
-    );
+List<Map<String, Object>> ledgerEntries = db.query(
+    "SELECT id, amount, kind FROM wallet_ledger WHERE user_id = ?",
+    authenticatedUserId
+);
 
-    @Query("SELECT COUNT(p) FROM ChargingPort p WHERE p.station.id = :stationId AND p.status = 'AVAILABLE'")
-    int countAvailablePorts(@Param("stationId") String stationId);
-}`}
+// Separate SQLite/JDBC connection; not the frontend's Node API database.`}
               </pre>
             </div>
           </div>
         )}
 
-        {/* Tab 5: MySQL Database Schema */}
+        {/* Tab 5: SQLite Database Schema */}
         {activeTab === 'mysql' && (
           <div className="space-y-4 font-mono text-xs">
             <p className="text-neutral-400 font-sans text-xs">
-              The Database Layer uses MySQL 8.0 InnoDB with foreign key integrity and B-Tree indexes for lightning-fast lookups.
+              Both backends currently use SQLite in separate database files. The Node schema is initialized safely from backend/src/db.ts.
             </p>
 
             <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-4 space-y-3">
-              <span className="text-emerald-400 text-xs font-bold block">-- MySQL Schema Definitions (schema.sql)</span>
+              <span className="text-emerald-400 text-xs font-bold block">-- Node API SQLite schema overview</span>
               <pre className="text-[11px] text-neutral-300 leading-relaxed overflow-x-auto">
-{`CREATE TABLE users (
-    id VARCHAR(36) PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
-    email VARCHAR(150) UNIQUE NOT NULL,
-    wallet_balance DECIMAL(10,2) DEFAULT 0.00,
-    rfid_tag VARCHAR(50),
-    role ENUM('CUSTOMER', 'ADMIN') DEFAULT 'CUSTOMER',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+{`users:
+  id TEXT PRIMARY KEY
+  wallet_balance_minor INTEGER NOT NULL DEFAULT 0
 
-CREATE TABLE charging_stations (
-    id VARCHAR(36) PRIMARY KEY,
-    name VARCHAR(150) NOT NULL,
-    latitude DECIMAL(10,8) NOT NULL,
-    longitude DECIMAL(11,8) NOT NULL,
-    power_kw INT NOT NULL,
-    pricing_per_kwh DECIMAL(5,2) NOT NULL,
-    status ENUM('OPERATIONAL', 'BUSY', 'MAINTENANCE') DEFAULT 'OPERATIONAL',
-    INDEX idx_coords (latitude, longitude)
-);
+wallet_ledger_entries:
+  user_id REFERENCES users(id)
+  UNIQUE(user_id, idempotency_key)
 
-CREATE TABLE bookings (
-    id VARCHAR(36) PRIMARY KEY,
-    booking_reference VARCHAR(20) UNIQUE NOT NULL,
-    user_id VARCHAR(36) NOT NULL,
-    station_id VARCHAR(36) NOT NULL,
-    port_id VARCHAR(36) NOT NULL,
-    status ENUM('CONFIRMED', 'ACTIVE', 'COMPLETED', 'CANCELLED'),
-    FOREIGN KEY (user_id) REFERENCES users(id),
-    FOREIGN KEY (station_id) REFERENCES charging_stations(id)
-);`}
+payment_methods:
+  user_id REFERENCES users(id) ON DELETE CASCADE
+  type CARD | UPI
+  status DEMO_ONLY | UNVERIFIED`}
               </pre>
             </div>
           </div>
@@ -473,7 +449,7 @@ CREATE TABLE bookings (
 
         {/* Footer */}
         <div className="flex items-center justify-between pt-4 border-t border-neutral-800 text-xs text-neutral-400">
-          <span>Compliant with standard Spring Boot + MySQL production architecture</span>
+          <span>Current frontend API: Node.js + Express + SQLite; Java Spring Boot/SQLite is separate</span>
           <button
             onClick={() => setIsArchitectureModalOpen(false)}
             className="px-5 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-white font-medium transition-colors"

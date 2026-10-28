@@ -11,6 +11,8 @@ interface GoogleMapViewProps {
   selectedStation: ChargingStation | null;
   activeCityKey?: string;
   onCityChange?: (cityKey: string) => void;
+  userLocation?: { latitude: number; longitude: number } | null;
+  onClearLocation?: () => void;
 }
 
 // Helper controller component to programmatically pan and zoom the Google Map
@@ -41,16 +43,23 @@ export const GoogleMapView: React.FC<GoogleMapViewProps> = ({
   selectedStation,
   activeCityKey = 'ALL',
   onCityChange,
+  userLocation = null,
+  onClearLocation,
 }) => {
   const { openBookingForStation, isMapsQuotaExceeded, setIsMapsQuotaExceeded, selectedCityFilter, setSelectedCityFilter } = useApp();
   const [activeMarkerStation, setActiveMarkerStation] = useState<ChargingStation | null>(null);
 
   const currentCityKey = onCityChange ? activeCityKey : (selectedCityFilter || 'ALL');
   const cityConfig = INDIA_CITY_CENTERS[currentCityKey] || INDIA_CITY_CENTERS['ALL'];
+  const mapCenter = userLocation
+    ? { lat: userLocation.latitude, lng: userLocation.longitude }
+    : { lat: cityConfig.lat, lng: cityConfig.lng };
+  const mapZoom = userLocation ? 12 : cityConfig.zoom;
 
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || 'AIzaSyCOykIG6PzBWv0QJyvmff-yCjQ9tvn9aMI';
 
   const handleCitySelect = (key: string) => {
+    onClearLocation?.();
     if (onCityChange) {
       onCityChange(key);
     } else {
@@ -76,7 +85,7 @@ export const GoogleMapView: React.FC<GoogleMapViewProps> = ({
       <div className="z-10 bg-neutral-950/90 backdrop-blur-md border-b border-neutral-800 p-2 flex items-center gap-1.5 overflow-x-auto scrollbar-none text-[11px]">
         <span className="text-neutral-400 font-semibold flex items-center gap-1 pl-1 pr-2 shrink-0">
           <Globe2 className="h-3.5 w-3.5 text-emerald-400" />
-          <span>India View:</span>
+          <span>{userLocation ? 'Your Location:' : 'India View:'}</span>
         </span>
         {Object.entries(INDIA_CITY_CENTERS).map(([key, config]) => {
           const isActive = currentCityKey === key;
@@ -106,16 +115,16 @@ export const GoogleMapView: React.FC<GoogleMapViewProps> = ({
           <Map
             mapId="DEMO_MAP_ID"
             internalUsageAttributionIds={['gmp_mcp_codeassist_v1_aistudio']}
-            defaultCenter={{ lat: cityConfig.lat, lng: cityConfig.lng }}
-            defaultZoom={cityConfig.zoom}
+            defaultCenter={mapCenter}
+            defaultZoom={mapZoom}
             gestureHandling="greedy"
             disableDefaultUI={false}
             className="w-full h-full"
             style={{ width: '100%', height: '100%' }}
           >
             <MapPanController
-              center={{ lat: cityConfig.lat, lng: cityConfig.lng }}
-              zoom={cityConfig.zoom}
+              center={mapCenter}
+              zoom={mapZoom}
               selectedStation={selectedStation}
             />
 
