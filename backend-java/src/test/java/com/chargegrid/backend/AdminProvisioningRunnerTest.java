@@ -1,5 +1,5 @@
 
-+       package com.chargegrid.backend;
+ package com.chargegrid.backend;
 
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
