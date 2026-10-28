@@ -9,13 +9,17 @@ import { z, ZodError } from "zod";
 import { randomBytes, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
-import { closeDatabase, db } from "./db.js";
+import { closeDatabase, db, seedDemoStations } from "./db.js";
 
 const PORT = Number(process.env.PORT ?? 10000);
 const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN ?? "1h";
-const allowedOrigins = (process.env.FRONTEND_ORIGINS ?? "http://localhost:3000,http://localhost:5173")
+const configuredOrigins = (process.env.FRONTEND_ORIGINS ?? "")
   .split(",").map((origin) => origin.trim()).filter(Boolean);
+const developmentOrigins = process.env.NODE_ENV === "development"
+  ? ["http://localhost:3000", "http://localhost:3003", "http://localhost:5173"]
+  : [];
+const allowedOrigins = [...new Set([...configuredOrigins, ...developmentOrigins])];
 
 if (!JWT_SECRET || Buffer.byteLength(JWT_SECRET) < 32) {
   throw new Error("JWT_SECRET must contain at least 32 bytes");
@@ -52,6 +56,17 @@ type SessionRow = {
   id: string; user_id: string; vehicle_id: string; station_id: string; port_id: string;
   booking_id: string | null; status: string; mode: string; started_at: string; ended_at: string | null;
   energy_delivered_kwh: number; accrued_cost_minor: number;
+};
+type PaymentMethodRow = {
+  id: string;
+  type: "CARD" | "UPI";
+  brand: string | null;
+  last_four: string | null;
+  expiration_month: number | null;
+  expiration_year: number | null;
+  upi_id: string | null;
+  status: "DEMO_ONLY" | "UNVERIFIED";
+  created_at: string;
 };
 
 const now = () => new Date().toISOString();
@@ -141,13 +156,41 @@ const vehicleSchema = z.object({
   make: z.string().trim().min(1).max(80), model: z.string().trim().min(1).max(100),
   year: z.number().int().min(1990).max(new Date().getFullYear() + 2),
   licensePlate: z.string().trim().max(30).optional().default(""),
+  vin: z.string().trim().max(40).optional().default(""),
   batteryCapacityKwh: z.number().min(1).max(500), maxChargingRateKw: z.number().min(1).max(1000),
   connectorType: z.enum(["CCS2", "Type 2", "CHAdeMO", "NACS"]),
   currentSocPercent: z.number().min(0).max(100).optional().default(50),
   estimatedRangeKm: z.number().min(0).max(3000).optional().default(0)
 });
+const paymentMethodSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("CARD"),
+    brand: z.enum(["Visa", "Mastercard", "Amex", "RuPay"]),
+    last4: z.string().regex(/^\d{4}$/),
+    expMonth: z.number().int().min(1).max(12),
+    expYear: z.number().int().min(new Date().getFullYear()).max(new Date().getFullYear() + 15)
+  }).strict(),
+  z.object({
+    type: z.literal("UPI"),
+    upiId: z.string().trim().min(3).max(320)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,255}@[A-Za-z][A-Za-z0-9.-]{1,63}$/)
+  }).strict()
+]);
+const paymentMethodForResponse = (method: PaymentMethodRow) => ({
+  id: method.id,
+  type: method.type,
+  ...(method.type === "CARD" ? {
+    brand: method.brand,
+    last4: method.last_four,
+    expMonth: method.expiration_month,
+    expYear: method.expiration_year
+  } : { upiId: method.upi_id }),
+  status: method.status,
+  createdAt: method.created_at
+});
 
 export function createApp() {
+  seedDemoStations();
   const app = express();
   app.disable("x-powered-by");
   app.use(helmet());
@@ -211,7 +254,8 @@ export function createApp() {
     return res.json({ token, user: userForResponse(user) });
   }));
   app.get("/api/v1/me", requireAuth, asyncRoute(async (req, res) => {
-    const user = db.prepare("SELECT * FROM users WHERE id = ?").get(req.auth!.userId) as UserRow | undefined;
+    const user = db.prepare("SELECT * FROM users WHERE id = ?")
+      .get(req.auth!.userId) as UserRow | undefined;
     if (!user) return jsonError(res, 404, "USER_NOT_FOUND", "Account not found.");
     return res.json({ ...userForResponse(user), createdAt: user.created_at });
   }));
@@ -318,11 +362,11 @@ export function createApp() {
       (id, user_id, make, model, year, license_plate, vin, battery_capacity_kwh,
        max_charging_rate_kw, connector_type, current_soc_percent, estimated_range_km,
        is_primary, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)`);
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     db.transaction(() => {
       const isPrimary = (db.prepare("SELECT 1 FROM vehicles WHERE user_id = ? LIMIT 1").get(userId) === undefined);
       insert.run(
-        id, userId, input.make, input.model, input.year, input.licensePlate,
+        id, userId, input.make, input.model, input.year, input.licensePlate, input.vin,
         input.batteryCapacityKwh, input.maxChargingRateKw, input.connectorType,
         input.currentSocPercent, input.estimatedRangeKm, isPrimary ? 1 : 0, timestamp, timestamp
       );
@@ -334,7 +378,7 @@ export function createApp() {
     const id = resourceId.parse(req.params.id);
     const input = vehicleSchema.partial().strict().parse(req.body);
     const columns: Record<string, keyof typeof input> = {
-      make: "make", model: "model", year: "year", licensePlate: "licensePlate",
+      make: "make", model: "model", year: "year", licensePlate: "licensePlate", vin: "vin",
       batteryCapacityKwh: "batteryCapacityKwh", maxChargingRateKw: "maxChargingRateKw",
       connectorType: "connectorType", currentSocPercent: "currentSocPercent",
       estimatedRangeKm: "estimatedRangeKm"
@@ -361,8 +405,32 @@ export function createApp() {
   }));
   app.delete("/api/v1/vehicles/:id", requireAuth, asyncRoute(async (req, res) => {
     const id = resourceId.parse(req.params.id);
-    const result = db.prepare("DELETE FROM vehicles WHERE id = ? AND user_id = ?").run(id, req.auth!.userId);
-    if (!result.changes) return jsonError(res, 404, "VEHICLE_NOT_FOUND", "Vehicle not found.");
+    const userId = req.auth!.userId;
+    try {
+      const deleted = db.transaction(() => {
+        const vehicle = db.prepare("SELECT is_primary FROM vehicles WHERE id = ? AND user_id = ?")
+          .get(id, userId) as { is_primary: number } | undefined;
+        if (!vehicle) return false;
+        db.prepare("DELETE FROM vehicles WHERE id = ? AND user_id = ?").run(id, userId);
+        if (vehicle.is_primary) {
+          const nextPrimary = db.prepare(
+            "SELECT id FROM vehicles WHERE user_id = ? ORDER BY created_at, id LIMIT 1"
+          ).get(userId) as { id: string } | undefined;
+          if (nextPrimary) {
+            db.prepare("UPDATE vehicles SET is_primary = 1, updated_at = ? WHERE id = ? AND user_id = ?")
+              .run(now(), nextPrimary.id, userId);
+          }
+        }
+        return true;
+      }).immediate();
+      if (!deleted) return jsonError(res, 404, "VEHICLE_NOT_FOUND", "Vehicle not found.");
+    } catch (error) {
+      if (error instanceof Error && "code" in error &&
+        (error as { code: string }).code === "SQLITE_CONSTRAINT_FOREIGNKEY") {
+        return jsonError(res, 409, "VEHICLE_IN_USE", "This vehicle is referenced by existing bookings or charging sessions.");
+      }
+      throw error;
+    }
     return res.status(204).end();
   }));
   app.post("/api/v1/vehicles/:id/primary", requireAuth, asyncRoute(async (req, res) => {
@@ -542,11 +610,62 @@ export function createApp() {
       }))
     });
   }));
-  app.post("/api/v1/wallet/demo-credit", requireAuth, asyncRoute(async (req, res) => {
-    if (process.env.NODE_ENV === "production") {
-      return jsonError(res, 403, "DISABLED_IN_PRODUCTION", "Demo wallet credits are disabled in production.");
+  app.get("/api/v1/payment-methods", requireAuth, asyncRoute(async (req, res) => {
+    const items = db.prepare(`SELECT id, type, brand, last_four, expiration_month,
+        expiration_year, upi_id, status, created_at
+      FROM payment_methods WHERE user_id = ? ORDER BY created_at DESC, id`)
+      .all(req.auth!.userId) as PaymentMethodRow[];
+    return res.json({ items: items.map(paymentMethodForResponse) });
+  }));
+  app.post("/api/v1/payment-methods", requireAuth, asyncRoute(async (req, res) => {
+    const input = paymentMethodSchema.parse(req.body);
+    if (input.type === "CARD" &&
+      input.expYear === new Date().getFullYear() && input.expMonth < new Date().getMonth() + 1) {
+      return jsonError(res, 422, "INVALID_EXPIRATION", "The card expiration date must be in the future.");
     }
-    const input = z.object({ amount: z.number().positive().max(10000) }).strict().parse(req.body);
+    const id = newId();
+    const timestamp = now();
+    try {
+      if (input.type === "CARD") {
+        db.prepare(`INSERT INTO payment_methods
+          (id, user_id, type, brand, last_four, expiration_month, expiration_year, status, created_at)
+          VALUES (?, ?, 'CARD', ?, ?, ?, ?, 'DEMO_ONLY', ?)`).run(
+          id, req.auth!.userId, input.brand, input.last4, input.expMonth, input.expYear, timestamp
+        );
+      } else {
+        db.prepare(`INSERT INTO payment_methods
+          (id, user_id, type, upi_id, status, created_at)
+          VALUES (?, ?, 'UPI', ?, 'UNVERIFIED', ?)`).run(
+          id, req.auth!.userId, input.upiId.trim(), timestamp
+        );
+      }
+    } catch (err) {
+      if (err instanceof Error && "code" in err &&
+        (err as { code: string }).code === "SQLITE_CONSTRAINT_UNIQUE") {
+        return jsonError(res, 409, "PAYMENT_METHOD_EXISTS", "This payment method is already saved.");
+      }
+      throw err;
+    }
+    const method = db.prepare(`SELECT id, type, brand, last_four, expiration_month,
+        expiration_year, upi_id, status, created_at
+      FROM payment_methods WHERE id = ? AND user_id = ?`)
+      .get(id, req.auth!.userId) as PaymentMethodRow;
+    return res.status(201).json(paymentMethodForResponse(method));
+  }));
+  app.delete("/api/v1/payment-methods/:id", requireAuth, asyncRoute(async (req, res) => {
+    const id = resourceId.parse(req.params.id);
+    const result = db.prepare("DELETE FROM payment_methods WHERE id = ? AND user_id = ?")
+      .run(id, req.auth!.userId);
+    if (!result.changes) {
+      return jsonError(res, 404, "PAYMENT_METHOD_NOT_FOUND", "Payment method not found.");
+    }
+    return res.status(204).end();
+  }));
+  app.post("/api/v1/wallet/demo-credit", requireAuth, asyncRoute(async (req, res) => {
+    if (process.env.NODE_ENV !== "development") {
+      return jsonError(res, 403, "DISABLED_OUTSIDE_DEVELOPMENT", "Demo wallet credits are only available in explicit development mode.");
+    }
+    const input = z.object({ amount: z.number().min(0.01).max(10000) }).strict().parse(req.body);
     const key = req.header("Idempotency-Key");
     if (!key || key.length > 100) {
       return jsonError(res, 400, "IDEMPOTENCY_KEY_REQUIRED", "Provide a valid Idempotency-Key header.");

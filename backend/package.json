@@ -7,9 +7,11 @@
     "node": ">=20"
   },
   "scripts": {
-  "build": "tsc -p tsconfig.json",
-  "start": "node dist/server.js"
-},
+      "build": "tsc -p tsconfig.json",
+      "typecheck": "tsc --noEmit -p tsconfig.json",
+      "test": "node --import tsx --test test/integration.test.ts",
+      "start": "node dist/server.js"
+  },
   "dependencies": {
     "bcryptjs": "^2.4.3",
     "better-sqlite3": "^13.0.3",

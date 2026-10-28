@@ -11,17 +11,16 @@ import {
   AlertCircle,
   X,
   Zap,
-  ShieldCheck,
 } from 'lucide-react';
 
 export const AuthModal: React.FC = () => {
-  const { isAuthModalOpen, setIsAuthModalOpen, login, register, setActiveTab, showToast } = useApp();
+  const { isAuthModalOpen, setIsAuthModalOpen, login, register, showToast } = useApp();
 
   const [mode, setMode] = useState<'login' | 'register'>('login');
-  const [email, setEmail] = useState('rahul.subramanian@evcharged.in');
-  const [password, setPassword] = useState('chennai2026!');
-  const [name, setName] = useState('Rahul Subramanian');
-  const [phone, setPhone] = useState('+91 98401 23456');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
   // Form states
@@ -31,46 +30,31 @@ export const AuthModal: React.FC = () => {
 
   if (!isAuthModalOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
     setSuccessMsg(null);
     setIsLoading(true);
 
-    setTimeout(() => {
+    if (mode === 'login') {
+      const res = await login(email, password);
       setIsLoading(false);
-      if (mode === 'login') {
-        const res = login(email, password);
-        if (!res.success) {
-          setErrorMsg(res.error || 'Authentication failed. Please verify credentials.');
-        } else {
-          setSuccessMsg('Signed in successfully! Redirecting...');
-          setTimeout(() => setIsAuthModalOpen(false), 500);
-        }
+      if (!res.success) {
+        setErrorMsg(res.error || 'Authentication failed. Please verify credentials.');
       } else {
-        const res = register(name, email, password, phone);
-        if (!res.success) {
-          setErrorMsg(res.error || 'Unable to register account.');
-        } else {
-          setSuccessMsg('Registration completed! Welcome to EV Charged.');
-          setTimeout(() => setIsAuthModalOpen(false), 500);
-        }
+        setSuccessMsg('Signed in successfully! Redirecting...');
+        setTimeout(() => setIsAuthModalOpen(false), 500);
       }
-    }, 400);
-  };
+      return;
+    }
 
-  const handleQuickFill = (type: 'customer' | 'admin') => {
-    setErrorMsg(null);
-    if (type === 'customer') {
-      setEmail('rahul.subramanian@evcharged.in');
-      setPassword('chennai2026!');
-      setName('Rahul Subramanian');
-      setPhone('+91 98401 23456');
+    const res = await register(name, email, password, phone);
+    setIsLoading(false);
+    if (!res.success) {
+      setErrorMsg(res.error || 'Unable to register account.');
     } else {
-      setEmail('admin.chennai@evcharged.in');
-      setPassword('admin_secure_chennai');
-      setName('Chennai Central Hub Ops Admin');
-      setPhone('+91 98400 99881');
+      setSuccessMsg('Registration completed! Welcome to EV Charged.');
+      setTimeout(() => setIsAuthModalOpen(false), 500);
     }
   };
 
@@ -217,7 +201,9 @@ export const AuthModal: React.FC = () => {
               <input
                 type={showPassword ? 'text' : 'password'}
                 required
-                value={password}
+                  minLength={mode === 'register' ? 10 : undefined}
+                  maxLength={128}
+                  value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
                 className={`w-full rounded-xl bg-neutral-900 border pl-9 pr-10 py-2.5 text-white placeholder-neutral-500 focus:outline-none transition-colors ${
@@ -245,7 +231,7 @@ export const AuthModal: React.FC = () => {
             {isLoading ? (
               <span className="flex items-center gap-2">
                 <span className="h-3.5 w-3.5 rounded-full border-2 border-neutral-950 border-t-transparent animate-spin" />
-                <span>Authenticating with Spring Security...</span>
+                <span>{mode === 'login' ? 'Signing in...' : 'Creating account...'}</span>
               </span>
             ) : (
               <span>{mode === 'login' ? 'Sign In' : 'Create EV Charged Account'}</span>
@@ -255,26 +241,6 @@ export const AuthModal: React.FC = () => {
 
 
 
-        {/* Quick Demo Credentials */}
-        <div className="pt-3 border-t border-neutral-800/80 space-y-2">
-          <p className="text-[11px] text-neutral-500 text-center">Quick Demo Presets:</p>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => handleQuickFill('customer')}
-              className="py-1.5 px-2 rounded-lg bg-neutral-900 border border-neutral-800 text-[11px] text-neutral-300 hover:text-white hover:border-neutral-700 transition-colors text-center"
-            >
-              Fill Rahul (Chennai Driver)
-            </button>
-            <button
-              type="button"
-              onClick={() => handleQuickFill('admin')}
-              className="py-1.5 px-2 rounded-lg bg-neutral-900 border border-neutral-800 text-[11px] text-neutral-300 hover:text-white hover:border-neutral-700 transition-colors text-center"
-            >
-              Fill Station Admin
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   );

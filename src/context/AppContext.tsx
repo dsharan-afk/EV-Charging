@@ -13,17 +13,78 @@ import {
 } from '../types';
 import {
   INITIAL_USER,
-  INITIAL_VEHICLES,
   INITIAL_STATIONS,
-  INITIAL_BOOKINGS,
-  INITIAL_TRANSACTIONS,
 } from '../data/mockData';
+import {
+  ApiError,
+  createVehicle as createVehicleWithApi,
+  deleteVehicle as deleteVehicleWithApi,
+  getWallet,
+  listVehicles,
+  listPaymentMethods,
+  login as loginWithApi,
+  logout as clearApiSession,
+  register as registerWithApi,
+  setPrimaryVehicle as setPrimaryVehicleWithApi,
+  updateVehicle as updateVehicleWithApi,
+  cancelBooking as cancelBookingWithApi,
+  createBooking as createBookingWithApi,
+  listBookings,
+  listStations,
+  toChargingStation,
+  type ApiBooking,
+  type CreateBookingInput,
+} from '../lib/api';
 
 interface Toast {
   id: string;
   type: 'success' | 'info' | 'warning' | 'error';
   message: string;
 }
+
+type CreateBookingDetails = Omit<
+  Booking,
+  'id' | 'bookingReference' | 'userId' | 'status' | 'qrCodeData' | 'createdAt' |
+  'date' | 'timeSlot' | 'estimatedEnergyKwh' | 'estimatedCost'
+> & Pick<CreateBookingInput, 'startsAt' | 'targetSocPercent'>;
+
+const formatBookingTime = (value: string) =>
+  new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+const bookingFromApi = (
+  item: ApiBooking,
+  userId: string,
+  stations: ChargingStation[],
+  vehicles: Vehicle[],
+): Booking => {
+  const station = stations.find((entry) => entry.id === item.stationId);
+  const vehicle = vehicles.find((entry) => entry.id === item.vehicleId);
+  const port = station?.ports.find((entry) => entry.id === item.portId);
+  const startsAt = new Date(item.startsAt);
+  const endsAt = new Date(item.endsAt);
+
+  return {
+    id: item.id,
+    bookingReference: item.bookingReference,
+    userId,
+    vehicleId: item.vehicleId,
+    vehicleName: vehicle ? `${vehicle.make} ${vehicle.model}` : 'Vehicle',
+    stationId: item.stationId,
+    stationName: station?.name ?? 'Charging station',
+    stationAddress: station ? `${station.address}, ${station.city}` : '',
+    portId: item.portId,
+    portNumber: port?.portNumber ?? 0,
+    connectorType: port?.connectorType ?? vehicle?.connectorType ?? 'CCS2',
+    date: startsAt.toLocaleDateString(),
+    timeSlot: `${formatBookingTime(item.startsAt)} - ${formatBookingTime(item.endsAt)}`,
+    durationMinutes: Math.max(0, Math.round((endsAt.getTime() - startsAt.getTime()) / 60000)),
+    estimatedEnergyKwh: item.estimatedEnergyKwh,
+    estimatedCost: item.estimatedCost,
+    status: item.status,
+    qrCodeData: item.bookingReference,
+    createdAt: item.createdAt,
+  };
+};
 
 interface AppContextType {
   activeTab: NavTab;
@@ -34,17 +95,18 @@ interface AppContextType {
   isAuthenticated: boolean;
   isAuthModalOpen: boolean;
   setIsAuthModalOpen: (open: boolean) => void;
-  login: (email: string, pass: string) => { success: boolean; error?: string };
-  register: (name: string, email: string, pass: string, phone: string) => { success: boolean; error?: string };
+  login: (email: string, pass: string) => Promise<{ success: boolean; error?: string }>;
+  register: (name: string, email: string, pass: string, phone: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   user: UserProfile;
   setUser: React.Dispatch<React.SetStateAction<UserProfile>>;
-  toggleUserRole: () => void;
   // Vehicles
   vehicles: Vehicle[];
-  primaryVehicle: Vehicle;
-  addVehicle: (vehicleData: Omit<Vehicle, 'id' | 'userId' | 'isPrimary'>) => void;
-  setPrimaryVehicle: (vehicleId: string) => void;
+  primaryVehicle: Vehicle | undefined;
+  addVehicle: (vehicleData: Omit<Vehicle, 'id' | 'userId' | 'isPrimary' | 'photoUrl'>) => Promise<boolean>;
+  updateVehicle: (vehicleId: string, updates: Partial<Omit<Vehicle, 'id' | 'userId' | 'isPrimary' | 'photoUrl'>>) => Promise<boolean>;
+  deleteVehicle: (vehicleId: string) => void;
+  setPrimaryVehicle: (vehicleId: string) => Promise<void>;
   updateVehicleSoc: (vehicleId: string, newSoc: number) => void;
   // Stations & Search
   stations: ChargingStation[];
@@ -68,7 +130,7 @@ interface AppContextType {
   setIsSearchPaletteOpen: (open: boolean) => void;
   // Bookings
   bookings: Booking[];
-  createBooking: (bookingData: Omit<Booking, 'id' | 'bookingReference' | 'userId' | 'status' | 'qrCodeToken' | 'createdAt'>) => Booking;
+  createBooking: (bookingData: CreateBookingDetails) => Promise<Booking>;
   cancelBooking: (bookingId: string) => void;
   // Live Charging & Payments
   activeSession: ChargingSession | null;
@@ -84,9 +146,7 @@ interface AppContextType {
   stopChargingSession: () => void;
   pendingPaymentSession: ChargingSession | null;
   clearPendingPayment: () => void;
-  processPayment: (paymentMethod: 'WALLET' | 'CARD' | 'APPLE_PAY' | 'GOOGLE_PAY' | 'RFID') => boolean;
   transactions: PaymentTransaction[];
-  addFundsToWallet: (amount: number) => void;
   // Utilities & Modals
   isArchitectureModalOpen: boolean;
   setIsArchitectureModalOpen: (open: boolean) => void;
@@ -126,13 +186,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     return (localStorage.getItem('voltflow_theme') as 'dark' | 'light') || 'dark';
   });
-  // First-time users see the dedicated Login Page first
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    return localStorage.getItem('evcharged_auth') === 'true';
-  });
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [user, setUser] = useState<UserProfile>(INITIAL_USER);
-  const [vehicles, setVehicles] = useState<Vehicle[]>(INITIAL_VEHICLES);
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [stations, setStations] = useState<ChargingStation[]>(INITIAL_STATIONS);
   const [selectedStation, setSelectedStation] = useState<ChargingStation | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -140,8 +197,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [selectedSpeedFilter, setSelectedSpeedFilter] = useState<'ALL' | 'FAST' | 'ULTRA'>('ALL');
   const [selectedCityFilter, setSelectedCityFilter] = useState<string>('ALL');
   const [selectedStateFilter, setSelectedStateFilter] = useState<string>('ALL');
-  const [bookings, setBookings] = useState<Booking[]>(INITIAL_BOOKINGS);
-  const [transactions, setTransactions] = useState<PaymentTransaction[]>(INITIAL_TRANSACTIONS);
+  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [transactions, setTransactions] = useState<PaymentTransaction[]>([]);
   const [activeSession, setActiveSession] = useState<ChargingSession | null>(null);
   const [pendingPaymentSession, setPendingPaymentSession] = useState<ChargingSession | null>(null);
   const [isArchitectureModalOpen, setIsArchitectureModalOpen] = useState(false);
@@ -291,52 +348,107 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }, 600);
   };
 
-  const login = (identifier: string, pass: string): { success: boolean; error?: string } => {
-    const cleanId = identifier.trim();
-    if (!cleanId) {
-      return { success: false, error: 'Please enter your email address or mobile number.' };
-    }
-    // Check if it looks like email or phone number
-    const isEmail = cleanId.includes('@');
-    const digitsOnly = cleanId.replace(/\D/g, '');
-    const isPhone = digitsOnly.length >= 10;
-
-    if (!isEmail && !isPhone) {
-      return { success: false, error: 'Please enter a valid email address or 10-digit mobile number.' };
-    }
-    if (!pass || pass.length < 4) {
-      return { success: false, error: 'Password must be at least 4 characters.' };
-    }
-
-    setIsAuthenticated(true);
-    setIsAuthModalOpen(false);
-    localStorage.setItem('evcharged_auth', 'true');
-    showToast(`Welcome back to EV Charged, ${user.name}!`, 'success');
-    return { success: true };
-  };
-
-  const register = (name: string, email: string, pass: string, phone: string): { success: boolean; error?: string } => {
-    if (!name || name.trim().length < 2) {
-      return { success: false, error: 'Please enter your full name.' };
-    }
-    if (!email || !email.includes('@')) {
+  const login = async (email: string, pass: string): Promise<{ success: boolean; error?: string }> => {
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail.includes('@')) {
       return { success: false, error: 'Please enter a valid email address.' };
     }
-    if (!pass || pass.length < 4) {
-      return { success: false, error: 'Password must contain at least 4 characters.' };
+    if (!pass) {
+      return { success: false, error: 'Please enter your password.' };
     }
 
-    setUser((prev) => ({
-      ...prev,
-      name,
-      email,
-      phone: phone || prev.phone,
-    }));
-    setIsAuthenticated(true);
-    setIsAuthModalOpen(false);
-    localStorage.setItem('evcharged_auth', 'true');
-    showToast(`Account created successfully! Welcome to EV Charged, ${name}.`, 'success');
-    return { success: true };
+    try {
+      const authenticatedUser = await loginWithApi({ email: cleanEmail, password: pass });
+      const [wallet, paymentMethods, savedVehicles, savedBookings, savedStations] = await Promise.all([
+        getWallet(),
+        listPaymentMethods(),
+        listVehicles(),
+        listBookings(),
+        listStations(new URLSearchParams({ limit: '100' })),
+      ]);
+      const accountVehicles = savedVehicles.items.map((vehicle) => ({ ...vehicle, vin: vehicle.vin ?? '' }));
+      const accountStations = savedStations.items.map(toChargingStation);
+      setUser({
+        ...INITIAL_USER,
+        id: authenticatedUser.id,
+        name: authenticatedUser.name,
+        email: authenticatedUser.email,
+        phone: authenticatedUser.phone,
+        role: authenticatedUser.role,
+        walletBalance: wallet.balance,
+        paymentMethods: paymentMethods.items,
+      });
+      setTransactions([]);
+      setBookings(savedBookings.items.map((booking) =>
+        bookingFromApi(booking, authenticatedUser.id, accountStations, accountVehicles)
+      ));
+      setVehicles(accountVehicles);
+      setIsAuthenticated(true);
+      setIsAuthModalOpen(false);
+      showToast(`Welcome back to EV Charged, ${authenticatedUser.name}!`, 'success');
+      return { success: true };
+    } catch (error) {
+      clearApiSession();
+      return {
+        success: false,
+        error: error instanceof ApiError
+          ? error.message
+          : 'Unable to sign in. Please try again.',
+      };
+    }
+  };
+
+  const register = async (
+    name: string,
+    email: string,
+    pass: string,
+    phone: string,
+  ): Promise<{ success: boolean; error?: string }> => {
+    const cleanName = name.trim();
+    const cleanEmail = email.trim().toLowerCase();
+    if (cleanName.length < 2) {
+      return { success: false, error: 'Please enter your full name.' };
+    }
+    if (!cleanEmail.includes('@')) {
+      return { success: false, error: 'Please enter a valid email address.' };
+    }
+    if (!pass || pass.length < 10) {
+      return { success: false, error: 'Password must contain at least 10 characters.' };
+    }
+
+    try {
+      const registeredUser = await registerWithApi({
+        name: cleanName,
+        email: cleanEmail,
+        password: pass,
+        phone: phone.trim(),
+      });
+      setUser({
+        ...INITIAL_USER,
+        id: registeredUser.id,
+        name: registeredUser.name,
+        email: registeredUser.email,
+        phone: registeredUser.phone,
+        role: registeredUser.role,
+        walletBalance: registeredUser.walletBalance,
+        paymentMethods: [],
+      });
+      setTransactions([]);
+      setVehicles([]);
+      setBookings([]);
+      setIsAuthenticated(true);
+      setIsAuthModalOpen(false);
+      showToast(`Account created successfully! Welcome to EV Charged, ${registeredUser.name}.`, 'success');
+      return { success: true };
+    } catch (error) {
+      clearApiSession();
+      return {
+        success: false,
+        error: error instanceof ApiError
+          ? error.message
+          : 'Unable to connect to the server. Please try again.',
+      };
+    }
   };
 
   const logout = () => {
@@ -347,52 +459,97 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       isDestructive: true,
       onConfirm: () => {
         setIsAuthenticated(false);
-        localStorage.removeItem('evcharged_auth');
+        clearApiSession();
+        setUser(INITIAL_USER);
+        setVehicles([]);
+        setBookings([]);
+        setTransactions([]);
         setActiveTab('home');
         showToast('You have been signed out. Welcome back anytime!', 'info');
       },
     });
   };
 
-  const primaryVehicle = vehicles.find((v) => v.isPrimary) || vehicles[0];
+  const primaryVehicle = vehicles.find((v) => v.isPrimary);
 
-  const toggleUserRole = () => {
-    const newRole = user.role === 'CUSTOMER' ? 'ADMIN' : 'CUSTOMER';
-    setUser((prev) => ({ ...prev, role: newRole }));
-    setRecentApiCall({
-      method: 'PUT',
-      endpoint: `/api/v1/users/${user.id}/role`,
-      layer: 'Business / Domain Layer (Role-Based Authorization)',
-      timestamp: new Date().toLocaleTimeString(),
-    });
-    showToast(`Switched view to ${newRole === 'ADMIN' ? 'Station Operator / Admin Mode' : 'Customer Mode'}`, 'info');
+  const addVehicle = async (
+    vehicleData: Omit<Vehicle, 'id' | 'userId' | 'isPrimary' | 'photoUrl'>
+  ): Promise<boolean> => {
+    try {
+      const savedVehicle = await createVehicleWithApi(vehicleData);
+      setVehicles((prev) => [...prev, savedVehicle]);
+      setRecentApiCall({
+        method: 'POST',
+        endpoint: '/api/v1/vehicles',
+        layer: 'Node API -> authenticated vehicle record',
+        timestamp: new Date().toLocaleTimeString(),
+      });
+      showToast(`${savedVehicle.make} ${savedVehicle.model} added to your EV Garage!`, 'success');
+      return true;
+    } catch (error) {
+      showToast(error instanceof ApiError ? error.message : 'Unable to save vehicle. Please try again.', 'error');
+      return false;
+    }
   };
 
-  const addVehicle = (vehicleData: Omit<Vehicle, 'id' | 'userId' | 'isPrimary'>) => {
-    const newVehicle: Vehicle = {
-      ...vehicleData,
-      id: `veh_${Date.now().toString().slice(-4)}`,
-      userId: user.id,
-      isPrimary: vehicles.length === 0,
-    };
-    setVehicles((prev) => [...prev, newVehicle]);
-    setRecentApiCall({
-      method: 'POST',
-      endpoint: '/api/v1/vehicles',
-      layer: 'Application Layer -> JPA VehicleRepository.save()',
-      timestamp: new Date().toLocaleTimeString(),
-    });
-    showToast(`${newVehicle.make} ${newVehicle.model} added to your EV Garage!`, 'success');
+  const updateVehicle = async (
+    vehicleId: string,
+    updates: Partial<Omit<Vehicle, 'id' | 'userId' | 'isPrimary' | 'photoUrl'>>
+  ): Promise<boolean> => {
+    try {
+      const savedVehicle = await updateVehicleWithApi(vehicleId, updates);
+      setVehicles((previous) =>
+        previous.map((vehicle) => vehicle.id === vehicleId
+          ? { ...vehicle, ...savedVehicle, vin: savedVehicle.vin ?? vehicle.vin }
+          : vehicle)
+      );
+      showToast(`${savedVehicle.make} ${savedVehicle.model} updated.`, 'success');
+      return true;
+    } catch (error) {
+      showToast(error instanceof ApiError ? error.message : 'Unable to update vehicle. Please try again.', 'error');
+      return false;
+    }
   };
 
-  const setPrimaryVehicle = (vehicleId: string) => {
-    setVehicles((prev) =>
-      prev.map((v) => ({
-        ...v,
-        isPrimary: v.id === vehicleId,
-      }))
-    );
-    showToast('Primary vehicle updated', 'info');
+  const deleteVehicle = (vehicleId: string) => {
+    const vehicle = vehicles.find((item) => item.id === vehicleId);
+    if (!vehicle) {
+      showToast('Vehicle not found in your garage.', 'error');
+      return;
+    }
+
+    openConfirmationModal({
+      title: 'Delete Vehicle',
+      message: `Delete ${vehicle.make} ${vehicle.model}? Existing bookings or charging-session records may prevent deletion.`,
+      confirmLabel: 'Delete Vehicle',
+      isDestructive: true,
+      onConfirm: () => {
+        void (async () => {
+          try {
+            await deleteVehicleWithApi(vehicleId);
+            setVehicles((previous) => {
+              const remaining = previous.filter((item) => item.id !== vehicleId);
+              if (!vehicle.isPrimary || remaining.length === 0) return remaining;
+              const nextPrimaryId = remaining[0].id;
+              return remaining.map((item) => ({ ...item, isPrimary: item.id === nextPrimaryId }));
+            });
+            showToast(`${vehicle.make} ${vehicle.model} deleted.`, 'success');
+          } catch (error) {
+            showToast(error instanceof ApiError ? error.message : 'Unable to delete vehicle. Please try again.', 'error');
+          }
+        })();
+      },
+    });
+  };
+
+  const setPrimaryVehicle = async (vehicleId: string) => {
+    try {
+      await setPrimaryVehicleWithApi(vehicleId);
+      setVehicles((prev) => prev.map((vehicle) => ({ ...vehicle, isPrimary: vehicle.id === vehicleId })));
+      showToast('Primary vehicle updated', 'info');
+    } catch (error) {
+      showToast(error instanceof ApiError ? error.message : 'Unable to update preferred vehicle.', 'error');
+    }
   };
 
   const updateVehicleSoc = (vehicleId: string, newSoc: number) => {
@@ -407,42 +564,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
   };
 
-  const createBooking = (
-    bookingData: Omit<Booking, 'id' | 'bookingReference' | 'userId' | 'status' | 'qrCodeToken' | 'createdAt'>
-  ): Booking => {
-    const refNum = Math.floor(1000 + Math.random() * 9000);
+  const createBooking = async (bookingData: CreateBookingDetails): Promise<Booking> => {
+    const savedBooking = await createBookingWithApi({
+      vehicleId: bookingData.vehicleId,
+      stationId: bookingData.stationId,
+      portId: bookingData.portId,
+      startsAt: bookingData.startsAt,
+      durationMinutes: bookingData.durationMinutes,
+      targetSocPercent: bookingData.targetSocPercent,
+    });
     const newBooking: Booking = {
       ...bookingData,
-      id: `bk_${Date.now().toString().slice(-4)}`,
-      bookingReference: `VF-BK-${refNum}`,
+      id: savedBooking.id,
+      bookingReference: savedBooking.bookingReference,
       userId: user.id,
-      status: 'CONFIRMED',
-      qrCodeToken: `VF-QR-CONFIRMED-${refNum}-${Date.now()}`,
-      createdAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
+      date: new Date(savedBooking.startsAt).toLocaleDateString(),
+      timeSlot: `${formatBookingTime(savedBooking.startsAt)} - ${formatBookingTime(savedBooking.endsAt)}`,
+      estimatedEnergyKwh: savedBooking.estimatedEnergyKwh,
+      estimatedCost: savedBooking.estimatedCost,
+      status: savedBooking.status,
+      qrCodeData: savedBooking.bookingReference,
+      createdAt: savedBooking.createdAt,
     };
 
     setBookings((prev) => [newBooking, ...prev]);
-
-    // Update port status in station
-    setStations((prev) =>
-      prev.map((stn) => {
-        if (stn.id === bookingData.stationId) {
-          return {
-            ...stn,
-            availablePorts: Math.max(0, stn.availablePorts - 1),
-            ports: stn.ports.map((p) =>
-              p.id === bookingData.portId ? { ...p, status: 'RESERVED' } : p
-            ),
-          };
-        }
-        return stn;
-      })
-    );
-
     setRecentApiCall({
       method: 'POST',
-      endpoint: '/api/v1/bookings/reserve',
-      layer: 'Application Layer -> Business Logic Conflict Validator -> MySQL Bookings',
+      endpoint: '/api/v1/bookings',
+      layer: 'Node API -> authenticated SQLite booking with availability validation',
       timestamp: new Date().toLocaleTimeString(),
     });
 
@@ -459,35 +608,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       message: `Are you sure you want to cancel reservation ${bk.bookingReference} for ${bk.stationName}? The charging stall will be immediately released for other drivers.`,
       confirmLabel: 'Yes, Cancel Reservation',
       isDestructive: true,
-      onConfirm: () => {
-        setBookings((prev) =>
-          prev.map((b) => (b.id === bookingId ? { ...b, status: 'CANCELLED' } : b))
-        );
-
-        // Free up port
-        setStations((prev) =>
-          prev.map((stn) => {
-            if (stn.id === bk.stationId) {
-              return {
-                ...stn,
-                availablePorts: Math.min(stn.totalPorts, stn.availablePorts + 1),
-                ports: stn.ports.map((p) =>
-                  p.id === bk.portId ? { ...p, status: 'AVAILABLE' } : p
-                ),
-              };
-            }
-            return stn;
-          })
-        );
-
-        setRecentApiCall({
-          method: 'PUT',
-          endpoint: `/api/v1/bookings/${bookingId}/cancel`,
-          layer: 'Application Layer -> Spring Data JPA BookingRepository.deleteById()',
-          timestamp: new Date().toLocaleTimeString(),
-        });
-
-        showToast('Reservation cancelled', 'info');
+      onConfirm: async () => {
+        try {
+          await cancelBookingWithApi(bookingId);
+          setBookings((prev) =>
+            prev.map((b) => (b.id === bookingId ? { ...b, status: 'CANCELLED' } : b))
+          );
+          setRecentApiCall({
+            method: 'POST',
+            endpoint: `/api/v1/bookings/${bookingId}/cancel`,
+            layer: 'Node API -> authenticated booking cancellation',
+            timestamp: new Date().toLocaleTimeString(),
+          });
+          showToast('Reservation cancelled', 'info');
+        } catch (error) {
+          showToast(error instanceof ApiError ? error.message : 'Unable to cancel this reservation.', 'error');
+        }
       },
     });
   };
@@ -673,80 +809,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           timestamp: new Date().toLocaleTimeString(),
         });
 
-        showToast('Charging session completed. Ready for payment checkout.', 'success');
+        showToast('Simulated charging session completed. A cost estimate is available; no payment was taken.', 'info');
       },
     });
   };
 
   const clearPendingPayment = () => {
     setPendingPaymentSession(null);
-  };
-
-  const processPayment = (paymentMethod: 'WALLET' | 'CARD' | 'APPLE_PAY' | 'GOOGLE_PAY' | 'RFID'): boolean => {
-    if (!pendingPaymentSession) return false;
-
-    const totalAmount = pendingPaymentSession.costAccrued;
-
-    if (paymentMethod === 'WALLET' && user.walletBalance < totalAmount) {
-      showToast('Insufficient wallet balance. Please top up or select a card.', 'error');
-      return false;
-    }
-
-    const invNum = `INV-${Date.now().toString().slice(-6)}`;
-    const newTx: PaymentTransaction = {
-      id: `tx_${Date.now().toString().slice(-4)}`,
-      sessionId: pendingPaymentSession.id,
-      bookingId: pendingPaymentSession.bookingId,
-      userId: user.id,
-      invoiceNumber: invNum,
-      amount: totalAmount,
-      currency: 'USD',
-      paymentMethod,
-      status: 'SUCCESS',
-      timestamp: new Date().toISOString().replace('T', ' ').slice(0, 16),
-      description: `Fast charging (${pendingPaymentSession.energyDeliveredKwh} kWh) at ${pendingPaymentSession.stationName}`,
-      breakdown: {
-        energyKwh: pendingPaymentSession.energyDeliveredKwh,
-        energyCost: totalAmount,
-        serviceFee: 0.0,
-        tax: 0.0,
-        discount: 0.0,
-      },
-    };
-
-    setTransactions((prev) => [newTx, ...prev]);
-
-    setUser((prev) => ({
-      ...prev,
-      walletBalance: paymentMethod === 'WALLET' ? Number((prev.walletBalance - totalAmount).toFixed(2)) : prev.walletBalance,
-      totalKwhCharged: Number((prev.totalKwhCharged + pendingPaymentSession.energyDeliveredKwh).toFixed(1)),
-      totalCo2SavedKg: Number((prev.totalCo2SavedKg + pendingPaymentSession.energyDeliveredKwh * 0.62).toFixed(1)),
-    }));
-
-    setRecentApiCall({
-      method: 'POST',
-      endpoint: '/api/v1/payments/process',
-      layer: 'Application Layer -> PaymentService -> Hibernate Transaction Ledger -> MySQL payments',
-      timestamp: new Date().toLocaleTimeString(),
-    });
-
-    setPendingPaymentSession(null);
-    showToast(`Payment of $${totalAmount.toFixed(2)} completed successfully!`, 'success');
-    return true;
-  };
-
-  const addFundsToWallet = (amount: number) => {
-    setUser((prev) => ({
-      ...prev,
-      walletBalance: Number((prev.walletBalance + amount).toFixed(2)),
-    }));
-    setRecentApiCall({
-      method: 'POST',
-      endpoint: `/api/v1/users/${user.id}/wallet/top-up`,
-      layer: 'Application Layer -> Spring Data JPA UserRepository.save()',
-      timestamp: new Date().toLocaleTimeString(),
-    });
-    showToast(`₹${amount.toFixed(2)} added to your EV Charged Wallet!`, 'success');
   };
 
   const openBookingForStation = (station: ChargingStation) => {
@@ -769,10 +838,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         logout,
         user,
         setUser,
-        toggleUserRole,
         vehicles,
         primaryVehicle,
         addVehicle,
+        updateVehicle,
+        deleteVehicle,
         setPrimaryVehicle,
         updateVehicleSoc,
         stations,
@@ -803,9 +873,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         stopChargingSession,
         pendingPaymentSession,
         clearPendingPayment,
-        processPayment,
         transactions,
-        addFundsToWallet,
         isArchitectureModalOpen,
         setIsArchitectureModalOpen,
         toasts,
